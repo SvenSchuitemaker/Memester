@@ -227,8 +227,10 @@ function timeline() {
       const owner = state.teams[placement.team];
       if (reveal && state.result.winner === owner.id && owner.id === team.id) return yearCard(state.card, true);
       const mark = reveal ? (state.result.winner === owner.id ? '✓' : '×') : '?';
-      return `<span class="slot placed-card team-${owner.color}" aria-label="${teamName(owner.id)}: ${label}${reveal ? (mark === '✓' ? ', goed' : ', fout') : ''}">
-        <strong aria-hidden="true">${mark}</strong><small>${teamName(owner.id)}</small></span>`;
+      const kind = owner.id === team.id ? 'Oorspronkelijke kaart' : 'Herlegging';
+      const description = `${kind} van ${teamName(owner.id)} — ${label}${reveal ? (mark === '✓' ? ', goed' : ', fout') : ''}`;
+      return `<span class="slot placed-card team-${owner.color}" role="img"
+        title="${description}" aria-label="${description}">${mark}</span>`;
     }
     if (canPlace || canMove) {
       const selected = canPlace && selection === index;
