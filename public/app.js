@@ -204,46 +204,81 @@ function endScreen() {
   </section>`;
 }
 
+function yearCard(card, earned = false) {
+  return `<div class="year-card ${earned ? 'earned' : ''}">
+    <strong>${card.year}</strong><span>${safe(card.title || 'Startkaart')}</span></div>`;
+}
+
 function timeline() {
   const team = state.teams[state.turn];
-  const canPlace = state.phase === 'place' && state.you?.team === state.turn;
-  const canMove = state.phase === 'challenge' && state.you && state.you.team !== state.turn && state.canMove;
-  const canSelect = canPlace || canMove;
+  const you = state.you && state.teams[state.you.team];
+  const cards = state.roundTimeline;
   const reveal = state.phase === 'reveal';
-  const shownSlot = canPlace ? selection : state.slot;
-  const slot = (index) => {
-    const active = index === shownSlot && (!reveal || !state.result.correct);
-    const right = reveal && !state.result.correct && state.result.correctSlot === index;
-    const label = index === 0 ? 'Vóór ' + team.cards[0].year : index === team.cards.length
-      ? 'Na ' + team.cards[index - 1].year
-      : 'Tussen ' + team.cards[index - 1].year + ' en ' + team.cards[index].year;
-    if (canSelect) {
-      return `<button class="slot ${active ? 'active-slot' : ''}" data-slot="${index}" aria-label="${label}"
-        aria-pressed="${active}" ${canMove && active ? 'disabled' : ''}>${active ? '?' : '+'}</button>`;
+  const challenge = state.phase === 'challenge';
+  const canPlace = state.phase === 'place' && you?.id === team.id;
+  const hasPlaced = state.placements.some(placement => placement.team === you?.id);
+  const canMove = challenge && you && you.id !== team.id && you.tokens > 0 && !hasPlaced;
+  const slot = index => {
+    const label = index === 0 ? 'Vóór ' + cards[0].year : index === cards.length
+      ? 'Na ' + cards[index - 1].year
+      : 'Tussen ' + cards[index - 1].year + ' en ' + cards[index].year;
+    const placement = state.placements.find(attempt => attempt.slot === index);
+    if (placement) {
+      const owner = state.teams[placement.team];
+      if (reveal && state.result.winner === owner.id && owner.id === team.id) return yearCard(state.card, true);
+      const mark = reveal ? (state.result.winner === owner.id ? '✓' : '×') : '?';
+      return `<span class="slot placed-card team-${owner.color}" aria-label="${teamName(owner.id)}: ${label}${reveal ? (mark === '✓' ? ', goed' : ', fout') : ''}">
+        <strong aria-hidden="true">${mark}</strong><small>${teamName(owner.id)}</small></span>`;
     }
-    return `<span class="slot ${active ? 'active-slot' : ''} ${right ? 'right-slot' : ''}" title="${label}"
-      aria-label="${label}${right ? ', juiste plek' : ''}">${right ? '✓' : active ? (reveal ? '×' : '?') : '·'}</span>`;
+    if (canPlace || canMove) {
+      const selected = canPlace && selection === index;
+      return `<button class="slot ${selected ? 'active-slot' : ''}" data-slot="${index}" aria-label="${label}"
+        aria-pressed="${selected}">${selected ? '?' : '+'}</button>`;
+    }
+    const correct = reveal && state.result.correctSlot === index;
+    return `<span class="slot ${correct ? 'right-slot' : ''}" title="${label}"
+      aria-label="${label}${correct ? ', juiste plek' : ''}">${correct ? '✓' : '·'}</span>`;
   };
-  let hint = 'Wacht tot ' + teamName(state.turn) + ' de kaart vastzet.';
-  if (canPlace) hint = 'Kies een vakje vóór, tussen of na de kaarten.';
-  if (state.phase === 'challenge') {
-    hint = canMove ? 'Tik op een ander vakje om de kaart te herleggen.'
-      : state.movedBy !== null ? teamName(state.movedBy) + ' heeft herlegd.' : 'Andere teams mogen de kaart herleggen.';
-    if (state.you && state.you.team !== state.turn && !state.canMove) hint = 'Je team heeft al herlegd.';
+  let hint = 'Wacht tot ' + teamName(team.id) + ' de kaart vastzet.';
+  if (canPlace) hint = 'Kies een vakje. Bij een gelijk jaartal leg je de kaart vóór dat jaar.';
+  if (challenge) {
+    hint = 'Andere teams kunnen een vrij vakje kiezen.';
+    if (canMove) hint = 'Tik op een vrij vakje om één herlegtoken in te zetten.';
+    else if (you && you.id !== team.id) {
+      hint = hasPlaced ? 'Je team heeft een kaart herlegd.' : 'Je team heeft geen herlegtokens meer.';
+    }
   }
-  if (reveal) hint = state.result.correct ? 'De kaart blijft op de tijdlijn.' : 'Het vinkje toont een juiste plek.';
+  if (reveal) {
+    const { winner } = state.result;
+    hint = winner === null ? 'Geen team heeft de kaart goed geplaatst.'
+      : winner === team.id ? teamName(winner) + ' krijgt de kaart.'
+      : teamName(winner) + ' krijgt de kaart en het herlegtoken terug.';
+    if (you && hasPlaced && you.id !== team.id && winner !== you.id) hint += ' Je team is het herlegtoken kwijt.';
+  }
   return `<section class="panel timeline-panel team-${team.color}">
     <div class="timeline-heading"><div><p class="eyebrow">Tijdlijn</p><h2><i></i>${teamName(team.id)}</h2></div>
-      ${state.phase === 'challenge' ? '<strong id="timer" class="timer" aria-label="Seconden over">7</strong>' : ''}
+      ${challenge ? '<strong id="timer" class="timer" aria-label="Seconden over">7</strong>' : ''}
     </div>
     <p class="hint">${hint}</p>
+    ${you ? `<p class="token-count team-${you.color}"><i></i>Herlegtokens van jouw team<strong>${you.tokens}</strong></p>` : ''}
     <div class="timeline" tabindex="0" aria-label="Kaarten en plaatsingsvakjes">
-      ${team.cards.map((card, index) => `${slot(index)}<div class="year-card ${reveal && state.result.correct && index === state.slot ? 'earned' : ''}">
-        <strong>${card.year}</strong><span>${safe(card.title || 'Startkaart')}</span></div>`).join('')}
-      ${slot(team.cards.length)}
+      ${cards.map((card, index) => slot(index) + yearCard(card)).join('')}
+      ${slot(cards.length)}
     </div>
     ${canPlace ? `<button class="primary" data-command="lock" ${selection === null ? 'disabled' : ''}>Lock kaart <span aria-hidden="true">→</span></button>` : ''}
     ${reveal && state.host ? `<button class="primary" data-command="next">${state.round === state.total ? 'Bekijk eindstand' : 'Volgende meme'} <span aria-hidden="true">→</span></button>` : ''}
+  </section>`;
+}
+
+function awardedTimeline() {
+  const winner = state.result?.winner;
+  if (winner == null || winner === state.turn) return '';
+  const team = state.teams[winner];
+  return `<section class="panel awarded-timeline team-${team.color}">
+    <h2><i></i> Tijdlijn ${teamName(winner)}</h2>
+    <div class="timeline" tabindex="0" aria-label="Kaarten van ${teamName(winner)}">
+      ${team.cards.map((card, index) => yearCard(card, index === state.result.awardedSlot)).join('')}
+    </div>
   </section>`;
 }
 
@@ -255,13 +290,13 @@ function game() {
     </div>
     <div class="game-grid">
       <section class="panel meme-panel ${reveal ? 'revealed' : ''}">
-        <p class="eyebrow">${reveal ? (state.result.correct ? 'Goed geplaatst' : 'Verkeerd geplaatst') : 'De meme'}</p>
+        <p class="eyebrow">${reveal ? (state.result.winner === null ? 'Verkeerd geplaatst' : 'Goed geplaatst') : 'De meme'}</p>
         <div class="meme-art" role="img" aria-label="Emoji-aanwijzing">${safe(state.card.clue)}</div>
         ${reveal ? `<h2>${safe(state.card.title)}</h2><p class="meme-year">${state.card.year}</p>`
           : state.host && state.card.video ? '<div id="media"><button class="secondary" data-command="video">▶ Speel clip af</button></div>'
           : '<p class="hint">In welk jaar werd deze meme bekend?</p>'}
       </section>
-      <div>${timeline()}</div>
+      <div>${timeline()}${reveal ? awardedTimeline() : ''}</div>
     </div>
   </section>`;
 }
@@ -269,19 +304,19 @@ function game() {
 function render() {
   leave.hidden = !session;
   const activeGame = state && ['place', 'challenge', 'reveal'].includes(state.phase);
-  if (activeGame && renderedView === 'game' && renderedRound === state.round && state.phase !== 'reveal') {
-    const oldTimeline = root.querySelector('.timeline');
+  const sameRound = activeGame && renderedView === 'game' && renderedRound === state.round;
+  const scroll = sameRound ? root.querySelector('.timeline').scrollLeft : 0;
+  if (sameRound && state.phase !== 'reveal') {
     const activeSlot = document.activeElement?.dataset.slot;
-    const oldLeft = oldTimeline.scrollLeft;
     root.querySelector('.timeline-panel').outerHTML = timeline();
     const newTimeline = root.querySelector('.timeline');
     if (activeSlot !== undefined) newTimeline.querySelector('[data-slot="' + activeSlot + '"]')?.focus({ preventScroll: true });
-    newTimeline.scrollLeft = oldLeft;
   } else {
     root.innerHTML = session ? (!state ? '<p class="loading">Lobby laden…</p>'
       : activeGame ? game() : state.phase === 'finished' ? endScreen() : lobby())
       : preview ? joinScreen() : home();
   }
+  if (sameRound) root.querySelector('.timeline').scrollLeft = scroll;
   renderedView = activeGame ? 'game' : state?.phase;
   renderedRound = state?.round;
   if (state?.host && state.phase === 'lobby' && qrCode !== state.code) loadQr();

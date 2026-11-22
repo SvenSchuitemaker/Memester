@@ -140,9 +140,17 @@ iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; }
   background: transparent; border: 1px dashed #778471; border-radius: 8px;
   color: var(--muted); font-size: 1.25rem; font-weight: 800;
 }
-button.slot:hover:not(:disabled) { background: #3e4837; color: var(--text); }
-.slot.active-slot { background: var(--lime); color: var(--ink); border-color: var(--lime); }
+button.slot:not(.active-slot):hover:not(:disabled) { background: #3e4837; color: var(--text); }
+.slot.active-slot, .slot.placed-card {
+  background: var(--accent); color: var(--ink); border-color: var(--accent);
+}
+.slot.placed-card { align-content: center; gap: .15rem; border-style: solid; }
+.placed-card small { font-size: .58rem; white-space: nowrap; }
 .slot.right-slot { color: #a5ebba; border-color: #a5ebba; }
+.token-count { display: flex; align-items: center; gap: .4rem; font-size: .85rem; margin-top: .5rem; }
+.token-count strong { color: var(--accent); }
+.awarded-timeline { margin-top: .65rem; }
+.awarded-timeline .timeline { margin-bottom: 0; }
 .year-card {
   flex: 0 0 clamp(64px, 10vw, 104px); min-height: 95px; display: grid; align-content: center;
   justify-items: center; gap: .25rem; padding: .3rem; text-align: center;

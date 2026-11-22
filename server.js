@@ -73,7 +73,7 @@ function createRoom(count) {
   const room = {
     code, host: randomUUID(), touched: Date.now(), version: 0,
     teams: Array.from({ length: count }, (_, i) => ({
-      id: i, color: teamColors[i], cards: [{ year: 2010 }, { year: 2015 }],
+      id: i, color: teamColors[i], tokens: 1, cards: [{ year: 2010 }, { year: 2015 }],
     })),
     players: new Map(), cards: shuffle(deck), phase: 'lobby', round: 0,
   };
@@ -102,23 +102,30 @@ function startRound(room) {
   room.phase = 'place';
   room.round++;
   room.card = room.cards.pop();
-  room.slot = null;
+  room.roundTimeline = room.teams[room.turn].cards.slice();
+  room.placements = [];
   room.deadline = null;
   room.result = null;
-  room.moved = new Set();
-  room.movedBy = null;
+}
+
+function insertionSlot(timeline, year) {
+  const slot = timeline.findIndex(card => card.year >= year);
+  return slot === -1 ? timeline.length : slot;
 }
 
 function resolveRound(room) {
   if (room.phase !== 'challenge' || Date.now() < room.deadline) return;
-  const timeline = room.teams[room.turn].cards;
-  const year = room.card.year;
-  const before = timeline[room.slot - 1]?.year ?? -Infinity;
-  const after = timeline[room.slot]?.year ?? Infinity;
-  const correct = year >= before && year <= after;
-  room.result = { correct, correctSlot: timeline.findIndex(card => card.year >= year) };
-  if (room.result.correctSlot < 0) room.result.correctSlot = timeline.length;
-  if (correct) timeline.splice(room.slot, 0, { year, title: room.card.title });
+  const { year, title } = room.card;
+  const correctSlot = insertionSlot(room.roundTimeline, year);
+  const winner = room.placements.find(placement => placement.slot === correctSlot)?.team ?? null;
+  room.result = { correctSlot, winner };
+  if (winner !== null) {
+    const team = room.teams[winner];
+    const awardedSlot = insertionSlot(team.cards, year);
+    team.cards.splice(awardedSlot, 0, { year, title });
+    room.result.awardedSlot = awardedSlot;
+    if (winner !== room.turn) team.tokens++;
+  }
   room.phase = 'reveal';
   publish(room);
 }
@@ -133,8 +140,8 @@ function view(room, token) {
         .map(player => player.name),
     })),
     phase: room.phase, turn: room.turn, round: room.round, total: deck.length,
-    slot: room.slot, deadline: room.deadline, now: Date.now(),
-    movedBy: room.movedBy, canMove: !!you && !room.moved?.has(you.team),
+    roundTimeline: room.roundTimeline, placements: room.placements,
+    deadline: room.deadline, now: Date.now(),
     result: room.result,
     card: room.card && {
       clue: room.card.clue, video: room.card.video,
@@ -163,12 +170,12 @@ function action(room, token, data) {
         room.phase = 'finished';
       }
     } else {
-      const timeline = room.teams[room.turn]?.cards;
+      const timeline = room.roundTimeline;
       check(Number.isInteger(data.slot) && data.slot >= 0 && data.slot <= timeline?.length,
         400, 'Kies een vakje op de tijdlijn.');
       if (data.action === 'lock') {
         check(you && you.team === room.turn && room.phase === 'place', 409, 'Je team kan nu niet vastzetten.');
-        room.slot = data.slot;
+        room.placements.push({ team: you.team, slot: data.slot });
         room.phase = 'challenge';
         room.deadline = Date.now() + 7000;
         const timer = setTimeout(() => resolveRound(room), 7000);
@@ -176,11 +183,12 @@ function action(room, token, data) {
       } else if (data.action === 'move') {
         check(you && you.team !== room.turn && room.phase === 'challenge' && Date.now() < room.deadline,
           409, 'De herplaatstijd is voorbij of je team is aan de beurt.');
-        check(!room.moved.has(you.team), 409, 'Je team heeft al herlegd.');
-        check(data.slot !== room.slot, 400, 'Kies een ander vakje.');
-        room.slot = data.slot;
-        room.moved.add(you.team);
-        room.movedBy = you.team;
+        check(!room.placements.some(placement => placement.team === you.team), 409, 'Je team heeft al herlegd.');
+        const team = room.teams[you.team];
+        check(team.tokens > 0, 409, 'Je team heeft geen herlegtokens meer.');
+        check(!room.placements.some(placement => placement.slot === data.slot), 409, 'Dit vakje is al bezet.');
+        team.tokens--;
+        room.placements.push({ team: you.team, slot: data.slot });
       } else {
         throw new RequestError(400, 'Onbekende actie.');
       }
