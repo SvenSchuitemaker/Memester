@@ -144,8 +144,7 @@ button.slot:not(.active-slot):hover:not(:disabled) { background: #3e4837; color:
 .slot.active-slot, .slot.placed-card {
   background: var(--accent); color: var(--ink); border-color: var(--accent);
 }
-.slot.placed-card { align-content: center; gap: .15rem; border-style: solid; }
-.placed-card small { font-size: .58rem; white-space: nowrap; }
+.slot.placed-card { border-style: solid; }
 .slot.right-slot { color: #a5ebba; border-color: #a5ebba; }
 .token-count { display: flex; align-items: center; gap: .4rem; font-size: .85rem; margin-top: .5rem; }
 .token-count strong { color: var(--accent); }
