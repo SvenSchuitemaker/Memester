@@ -309,10 +309,27 @@ function render() {
   const sameRound = activeGame && renderedView === 'game' && renderedRound === state.round;
   const scroll = sameRound ? root.querySelector('.timeline').scrollLeft : 0;
   if (sameRound && state.phase !== 'reveal') {
-    const activeSlot = document.activeElement?.dataset.slot;
-    root.querySelector('.timeline-panel').outerHTML = timeline();
-    const newTimeline = root.querySelector('.timeline');
-    if (activeSlot !== undefined) newTimeline.querySelector('[data-slot="' + activeSlot + '"]')?.focus({ preventScroll: true });
+    const panel = root.querySelector('.timeline-panel');
+    const next = document.createElement('template');
+    next.innerHTML = timeline();
+    const nextPanel = next.content.firstElementChild;
+    const currentRow = panel.querySelector('.timeline');
+    const nextRow = nextPanel.querySelector('.timeline');
+    // Keep the scroll container and unchanged cards mounted during the countdown.
+    for (const [index, item] of [...currentRow.children].entries()) {
+      const replacement = nextRow.children[index];
+      if (!item.isEqualNode(replacement)) {
+        const focused = item === document.activeElement;
+        const updated = replacement.cloneNode(true);
+        item.replaceWith(updated);
+        if (focused) (updated.matches('button') ? updated : currentRow).focus({ preventScroll: true });
+      }
+    }
+    // Update the controls around the live row without detaching it.
+    while (currentRow.previousElementSibling) currentRow.previousElementSibling.remove();
+    while (currentRow.nextElementSibling) currentRow.nextElementSibling.remove();
+    while (nextPanel.firstElementChild !== nextRow) currentRow.before(nextPanel.firstElementChild);
+    currentRow.after(...[...nextPanel.children].slice(1));
   } else {
     root.innerHTML = session ? (!state ? '<p class="loading">Lobby laden…</p>'
       : activeGame ? game() : state.phase === 'finished' ? endScreen() : lobby())
