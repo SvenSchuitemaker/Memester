@@ -18,6 +18,10 @@ let qrUrl;
 let qrCode;
 let renderedView;
 let renderedRound;
+let renderedPerformer;
+let renderedPrivate;
+const modes = ['emoji', 'video', 'draw', 'act'];
+const modeLabels = ['Emoji’s', 'Video', 'Tekenen', 'Uitbeelden'];
 
 function safe(value) {
   return String(value).replace(/[&<>"']/g, char => ({
@@ -171,7 +175,7 @@ function teamTiles(teams, showScore = false) {
 }
 
 function lobby() {
-  const ready = state.teams.every(team => team.players.length);
+  const ready = state.teams.every(team => team.players.length >= 2);
   return `<section class="stage lobby">
     <div class="stage-title"><p class="eyebrow">Lobby ${state.code}</p>
       <h1>${state.host ? 'Verzamel je teams.' : 'Je zit in de lobby.'}</h1>
@@ -186,7 +190,7 @@ function lobby() {
       </section>` : ''}
       <section class="panel roster"><h2>Teams</h2>${teamTiles(state.teams)}
         ${state.host ? `<button class="primary" data-command="start" ${ready ? '' : 'disabled'}>Start spel <span aria-hidden="true">→</span></button>
-        ${ready ? '' : '<p class="hint">Elk team heeft minstens één speler nodig.</p>'}` : ''}
+        ${ready ? '' : '<p class="hint">Elk team heeft minstens twee spelers nodig voor tekenen en uitbeelden.</p>'}` : ''}
       </section>
     </div>
   </section>`;
@@ -215,7 +219,9 @@ function timeline() {
   const cards = state.roundTimeline;
   const reveal = state.phase === 'reveal';
   const challenge = state.phase === 'challenge';
-  const canPlace = state.phase === 'place' && you?.id === team.id;
+  const privateRound = state.mode === 'draw' || state.mode === 'act';
+  const activeTeam = you?.id === team.id;
+  const canPlace = state.phase === 'place' && activeTeam && !state.isPerformer && (!privateRound || state.performer);
   const hasPlaced = state.placements.some(placement => placement.team === you?.id);
   const canMove = challenge && you && you.id !== team.id && you.tokens > 0 && !hasPlaced;
   const slot = index => {
@@ -243,6 +249,9 @@ function timeline() {
   };
   let hint = 'Wacht tot ' + teamName(team.id) + ' de kaart vastzet.';
   if (canPlace) hint = 'Kies een vakje. Bij een gelijk jaartal leg je de kaart vóór dat jaar.';
+  if (state.phase === 'place' && privateRound && activeTeam && !canPlace) {
+    hint = state.isPerformer ? 'Je teamgenoten plaatsen de kaart.' : 'Kies eerst wie de meme uitbeeldt of tekent.';
+  }
   if (challenge) {
     hint = 'Andere teams kunnen een vrij vakje kiezen.';
     if (canMove) hint = 'Tik op een vrij vakje om één herlegtoken in te zetten.';
@@ -284,19 +293,54 @@ function awardedTimeline() {
   </section>`;
 }
 
+function videoControl() {
+  if (!state.card.video) {
+    return state.card.source ? `<a class="text-button media-link" href="${safe(state.card.source)}"
+      target="_blank" rel="noopener noreferrer">Bekijk de meme</a>` : '';
+  }
+  return `<div id="media"><button class="secondary" data-command="video">▶ Speel clip af</button>
+    <a class="text-button media-link" href="https://www.youtube.com/watch?v=${encodeURIComponent(state.card.video)}"
+      target="_blank" rel="noopener noreferrer">Open op YouTube</a></div>`;
+}
+
+function memePrompt() {
+  if (state.phase === 'reveal') {
+    return `<h2>${safe(state.card.title)}</h2><p class="meme-year">${state.card.year}</p>${videoControl()}`;
+  }
+  if (state.mode === 'emoji') {
+    return `<div class="meme-art" role="img" aria-label="Emoji-aanwijzing">${safe(state.card.clue)}</div>`;
+  }
+  if (state.mode === 'video') return videoControl();
+
+  const drawing = state.mode === 'draw';
+  if (state.isPerformer) {
+    return `<h2>${safe(state.card.title)}</h2>${videoControl()}
+      <p class="hint">${drawing ? 'Teken de meme op papier' : 'Beeld de meme uit'} en laat je teamgenoten raden.</p>`;
+  }
+  if (state.performer) {
+    const action = drawing ? 'tekent de meme' : 'beeldt de meme uit';
+    return `<p>${safe(state.performer)} ${action}. Raad welke meme het is.</p>`;
+  }
+  if (state.you?.team === state.turn) {
+    return `<p>Eén teamgenoot bekijkt de meme privé en ${drawing ? 'tekent' : 'beeldt uit'}.</p>
+      <button class="secondary" data-command="perform">${drawing ? 'Ik ga tekenen' : 'Ik ga uitbeelden'}</button>`;
+  }
+  return '<p>Het team dat aan de beurt is kiest wie de meme privé bekijkt.</p>';
+}
+
 function game() {
   const reveal = state.phase === 'reveal';
+  const mode = modes.indexOf(state.mode);
+  const turnInMode = (state.round - 1) % state.teams.length + 1;
   return `<section class="stage game">
-    <div class="stage-title"><p class="eyebrow">Ronde ${state.round} / ${state.total}</p>
+    <div class="stage-title"><p class="eyebrow">Ronde ${mode + 1} / ${modes.length} · ${modeLabels[mode]}</p>
       <h1>${state.you?.team === state.turn ? 'Jouw team is aan de beurt.' : teamName(state.turn) + ' is aan de beurt.'}</h1>
+      <p>Beurt ${turnInMode} / ${state.teams.length}</p>
     </div>
     <div class="game-grid">
       <section class="panel meme-panel ${reveal ? 'revealed' : ''}">
-        <p class="eyebrow">${reveal ? (state.result.winner === null ? 'Verkeerd geplaatst' : 'Goed geplaatst') : 'De meme'}</p>
-        <div class="meme-art" role="img" aria-label="Emoji-aanwijzing">${safe(state.card.clue)}</div>
-        ${reveal ? `<h2>${safe(state.card.title)}</h2><p class="meme-year">${state.card.year}</p>`
-          : state.host && state.card.video ? '<div id="media"><button class="secondary" data-command="video">▶ Speel clip af</button></div>'
-          : '<p class="hint">In welk jaar werd deze meme bekend?</p>'}
+        <p class="eyebrow">${reveal ? (state.result.winner === null ? 'Verkeerd geplaatst' : 'Goed geplaatst') : state.isPerformer ? 'Privé voor jou' : 'De meme'}</p>
+        ${memePrompt()}
       </section>
       <div>${timeline()}${reveal ? awardedTimeline() : ''}</div>
     </div>
@@ -308,7 +352,8 @@ function render() {
   const activeGame = state && ['place', 'challenge', 'reveal'].includes(state.phase);
   const sameRound = activeGame && renderedView === 'game' && renderedRound === state.round;
   const scroll = sameRound ? root.querySelector('.timeline').scrollLeft : 0;
-  if (sameRound && state.phase !== 'reveal') {
+  if (sameRound && state.phase !== 'reveal'
+    && renderedPerformer === state.performer && renderedPrivate === state.isPerformer) {
     const panel = root.querySelector('.timeline-panel');
     const next = document.createElement('template');
     next.innerHTML = timeline();
@@ -338,6 +383,8 @@ function render() {
   if (sameRound) root.querySelector('.timeline').scrollLeft = scroll;
   renderedView = activeGame ? 'game' : state?.phase;
   renderedRound = state?.round;
+  renderedPerformer = state?.performer;
+  renderedPrivate = state?.isPerformer;
   if (state?.host && state.phase === 'lobby' && qrCode !== state.code) loadQr();
   updateTimer();
 }
@@ -412,7 +459,7 @@ function playVideo() {
   iframe.title = 'Memeclip';
   iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
   iframe.allowFullscreen = true;
-  media.replaceChildren(iframe);
+  media.querySelector('button').replaceWith(iframe);
 }
 
 function sendAction(action, slot, button) {
@@ -446,7 +493,7 @@ root.addEventListener('click', event => {
       navigator.clipboard.writeText(inviteLink()).then(() => tell('Uitnodigingslink gekopieerd.'))
         .catch(() => window.prompt('Kopieer de uitnodigingslink', inviteLink()));
     } else window.prompt('Kopieer de uitnodigingslink', inviteLink());
-  } else if (['start', 'next', 'lock'].includes(command)) {
+  } else if (['start', 'next', 'lock', 'perform'].includes(command)) {
     sendAction(command, command === 'lock' ? selection : undefined, button);
   }
 });

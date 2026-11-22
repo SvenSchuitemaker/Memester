@@ -177,3 +177,7 @@ button.slot:not(.active-slot):hover:not(:disabled) { background: #3e4837; color:
   .timeline { gap: .24rem; }
   .timeline-panel { padding-inline: .75rem; }
 }
+
+.meme-panel #media, .meme-panel h2, .meme-panel > p + p { margin-top: .75rem; }
+.meme-panel .media-link { display: inline-block; font-size: .85rem; }
+.meme-panel > p + button { margin-top: .75rem; }

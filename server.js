@@ -4,6 +4,7 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const QRCode = require('qrcode');
 const deck = require('./deck');
+const modes = ['emoji', 'video', 'draw', 'act'];
 
 const port = Number(process.env.PORT || 3000);
 const rooms = new Map();
@@ -75,7 +76,7 @@ function createRoom(count) {
     teams: Array.from({ length: count }, (_, i) => ({
       id: i, color: teamColors[i], tokens: 1, cards: [{ year: 2010 }, { year: 2015 }],
     })),
-    players: new Map(), cards: shuffle(deck), phase: 'lobby', round: 0,
+    players: new Map(), phase: 'lobby', round: 0,
   };
   rooms.set(code, room);
   return room;
@@ -98,10 +99,20 @@ function seat(room, data) {
   return token;
 }
 
+function gameDeck(teamCount) {
+  const clips = shuffle(deck.filter(card => card.video));
+  const emoji = clips.splice(0, teamCount);
+  const video = clips.splice(0, teamCount);
+  const performance = shuffle([...clips, ...deck.filter(card => !card.video)]);
+  return [...emoji, ...video, ...performance.slice(0, teamCount * 2)];
+}
+
 function startRound(room) {
   room.phase = 'place';
   room.round++;
-  room.card = room.cards.pop();
+  room.mode = modes[Math.floor((room.round - 1) / room.teams.length)];
+  room.card = room.cards[room.round - 1];
+  room.performer = null;
   room.roundTimeline = room.teams[room.turn].cards.slice();
   room.placements = [];
   room.deadline = null;
@@ -133,19 +144,26 @@ function resolveRound(room) {
 function view(room, token) {
   const you = room.players.get(token);
   const reveal = room.phase === 'reveal';
+  const privateRound = room.mode === 'draw' || room.mode === 'act';
+  const performer = room.players.get(room.performer);
+  const maySeePrompt = token === room.performer && privateRound && ['place', 'challenge'].includes(room.phase);
   return {
     version: room.version, code: room.code, host: room.host === token,
     you, teams: room.teams.map(team => ({
       ...team, players: [...room.players.values()].filter(player => player.team === team.id)
         .map(player => player.name),
     })),
-    phase: room.phase, turn: room.turn, round: room.round, total: deck.length,
+    phase: room.phase, turn: room.turn, round: room.round, total: room.cards?.length, mode: room.mode,
+    performer: performer?.name, isPerformer: maySeePrompt,
     roundTimeline: room.roundTimeline, placements: room.placements,
     deadline: room.deadline, now: Date.now(),
     result: room.result,
     card: room.card && {
-      clue: room.card.clue, video: room.card.video,
-      ...(reveal ? { year: room.card.year, title: room.card.title } : {}),
+      clue: room.mode === 'emoji' ? room.card.clue : undefined,
+      video: reveal || room.mode === 'video' || maySeePrompt ? room.card.video : undefined,
+      source: reveal || maySeePrompt ? room.card.source : undefined,
+      title: reveal || maySeePrompt ? room.card.title : undefined,
+      year: reveal ? room.card.year : undefined,
     },
   };
 }
@@ -155,15 +173,20 @@ function action(room, token, data) {
   const you = room.players.get(token);
   if (data.action === 'start') {
     check(host && room.phase === 'lobby', 409, 'Je kunt het spel nu niet starten.');
-    check(room.teams.every(team => [...room.players.values()].some(player => player.team === team.id)),
-      409, 'Elk team heeft minstens één speler nodig.');
+    check(room.teams.every(team => [...room.players.values()].filter(player => player.team === team.id).length >= 2),
+      409, 'Elk team heeft minstens twee spelers nodig voor tekenen en uitbeelden.');
+    room.cards = gameDeck(room.teams.length);
     room.turn = 0;
     startRound(room);
   } else {
     check(data.round === room.round, 409, 'Deze ronde is voorbij.');
-    if (data.action === 'next') {
+    if (data.action === 'perform') {
+      check(you?.team === room.turn && room.phase === 'place' && !room.performer
+        && (room.mode === 'draw' || room.mode === 'act'), 409, 'Je kunt de meme nu niet bekijken.');
+      room.performer = token;
+    } else if (data.action === 'next') {
       check(host && room.phase === 'reveal', 409, 'De volgende ronde is nog niet beschikbaar.');
-      if (room.cards.length) {
+      if (room.round < room.cards.length) {
         room.turn = (room.turn + 1) % room.teams.length;
         startRound(room);
       } else {
@@ -175,6 +198,9 @@ function action(room, token, data) {
         400, 'Kies een vakje op de tijdlijn.');
       if (data.action === 'lock') {
         check(you && you.team === room.turn && room.phase === 'place', 409, 'Je team kan nu niet vastzetten.');
+        if (room.mode === 'draw' || room.mode === 'act') {
+          check(room.performer && token !== room.performer, 409, 'Laat een radende teamgenoot de kaart plaatsen.');
+        }
         room.placements.push({ team: you.team, slot: data.slot });
         room.phase = 'challenge';
         room.deadline = Date.now() + 7000;
